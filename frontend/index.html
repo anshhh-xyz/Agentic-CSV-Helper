@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Data Analysis Agent</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<div class="layout">
+
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <h1>Data Analysis Agent</h1>
+      <p class="tagline">Ask questions about a dataset. Every answer comes from a real computation, not a guess.</p>
+    </div>
+
+    <div class="panel">
+      <h2>Dataset</h2>
+      <label class="upload-control" for="file-input">
+        <span id="upload-label">Upload CSV</span>
+        <input type="file" id="file-input" accept=".csv" hidden />
+      </label>
+      <div id="dataset-info" class="dataset-info">
+        <p class="dim">Loading bundled sample…</p>
+      </div>
+    </div>
+
+    <div class="panel panel-grow">
+      <h2>Columns</h2>
+      <div id="schema-list" class="schema-list">
+        <p class="dim">—</p>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Connection</h2>
+      <div class="status-row">
+        <span id="status-dot" class="status-dot"></span>
+        <span id="status-text" class="mono dim">checking backend…</span>
+      </div>
+      <p class="hint">Backend must be running at <code id="api-base-display" class="mono"></code></p>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="chat-header">
+      <span id="active-dataset-name">sample_sales.csv</span>
+      <span class="chat-header-sub mono dim" id="active-dataset-meta"></span>
+    </div>
+
+    <div class="chat-thread" id="chat-thread">
+      <div class="empty-state" id="empty-state">
+        <p>Try asking:</p>
+        <ul>
+          <li>What columns are in this dataset?</li>
+          <li>What's the average revenue by region?</li>
+          <li>Are there any outliers in revenue?</li>
+          <li>Show me a bar chart of revenue by category</li>
+          <li>Find the region with the highest average revenue and plot its monthly trend</li>
+          <li>Give me the average and median revenue, and plot revenue over time</li>
+        </ul>
+      </div>
+    </div>
+
+    <form class="chat-input-row" id="chat-form">
+      <input
+        type="text"
+        id="chat-input"
+        class="chat-input"
+        placeholder="Ask a question about this data…"
+        autocomplete="off"
+      />
+      <button type="submit" class="ask-button" id="ask-button">Ask</button>
+    </form>
+  </main>
+
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>
