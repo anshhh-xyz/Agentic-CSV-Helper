@@ -7,6 +7,7 @@ import os
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PLOTS_DIR = os.path.join(BASE_DIR, "outputs", "plots")
+MEMORY_DB_PATH = os.path.join(BASE_DIR, "data", "memory.db")
 
 
 def groq_model() -> str:

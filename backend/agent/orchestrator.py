@@ -119,13 +119,13 @@ def _force_final(client, messages, tools) -> str:
 
 # ------------------------------------- main -------------------------------------
 
-def run_agent(df: pd.DataFrame, user_question: str, verbose: bool = False,
-              client=None, extra_context: str | None = None) -> dict:
+def run_agent(df: pd.DataFrame, user_question: str, dataset_id: str,
+              verbose: bool = False, client=None, extra_context: str | None = None) -> dict:
     """`client` is injectable for tests; `extra_context` is where a future
     memory layer can add text to the system prompt."""
     client = client or get_client()
     tools = tool_registry.get_tool_schemas()
-    ctx = ToolContext(df=df, plots_dir=PLOTS_DIR)   # cleaning tools swap ctx.df; `df` is never mutated
+    ctx = ToolContext(df=df, plots_dir=PLOTS_DIR, scope=dataset_id)   # cleaning tools swap ctx.df; `df` is never mutated
 
     messages = [
         {"role": "system", "content": build_system_prompt(df, extra_context)},

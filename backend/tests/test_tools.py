@@ -26,6 +26,7 @@ EXPECTED = {
     "correlation_analysis": {"correlation_matrix", "pairwise_correlation", "covariance",
                              "linear_regression", "trend_analysis"},
     "outlier_analysis": {"iqr_outliers", "zscore_outliers", "outlier_summary"},
+    "memory": {"remember", "forget", "list_memory"},
 }
 MUTATING = {"fill_missing", "drop_missing", "remove_duplicates", "rename_columns", "convert_dtype", "select_columns"}
 W = [{"column": "region", "operator": "==", "value": "West"}]

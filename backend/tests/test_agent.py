@@ -46,7 +46,7 @@ class TestChainedExecution(unittest.TestCase):
 
     def test_two_step_dependency_uses_first_result(self):
         client = FakeClient(self.policy)
-        out = run_agent(DF, "Find the region with the highest average revenue and plot its monthly trend.", client=client)
+        out = run_agent(DF, "Find the region with the highest average revenue and plot its monthly trend.", client=client,dataset_id="sample_sales.csv")
 
         self.assertIn(TOP_REGION, out["answer"])
         self.assertEqual([t["tool"] for t in out["tool_trace"]], ["group_aggregate", "line_plot"])
@@ -64,7 +64,7 @@ class TestChainedExecution(unittest.TestCase):
 
     def test_message_protocol_is_valid(self):
         client = FakeClient(self.policy)
-        run_agent(DF, "q", client=client)
+        run_agent(DF, "q", client=client,dataset_id="sample_sales.csv")
         final_msgs = client.requests[-1]["messages"]
         assert final_msgs[0]["role"] == "system" and final_msgs[1]["role"] == "user"
         for i, m in enumerate(final_msgs):
@@ -76,7 +76,7 @@ class TestChainedExecution(unittest.TestCase):
 
     def test_model_never_sees_file_paths(self):
         client = FakeClient(self.policy)
-        run_agent(DF, "q", client=client)
+        run_agent(DF, "q", client=client,dataset_id="sample_sales.csv")
         blob = json.dumps(client.requests[-1]["messages"])
         self.assertNotIn(".png", blob)
         self.assertNotIn("/home/", blob)
@@ -90,7 +90,7 @@ class TestChainedExecution(unittest.TestCase):
             if len(r) == 1:
                 return msg(calls=[tc("mean", {"column": "rating"})])
             return msg(content=f"mean rating after filling: {r[1]['value']}")
-        out = run_agent(DF, "fill missing ratings with 0 then average them", client=FakeClient(policy))
+        out = run_agent(DF, "fill missing ratings with 0 then average them", client=FakeClient(policy),dataset_id="sample_sales.csv")
         self.assertAlmostEqual(float(out["answer"].split(": ")[1]), DF.rating.fillna(0).mean(), places=3)
         self.assertEqual(int(DF.rating.isna().sum()) > 0, True)   # stored dataset not modified
 
@@ -106,7 +106,7 @@ class TestParallelExecution(unittest.TestCase):
                                   tc("count", {"column": "customer_age", "distinct": True}),
                                   tc("line_plot", {"x": "order_date", "y": "revenue", "resample": "M"})])
             return msg(content="done")
-        out = run_agent(DF, "avg, median, distinct ages and plot", client=FakeClient(policy))
+        out = run_agent(DF, "avg, median, distinct ages and plot", client=FakeClient(policy),dataset_id="sample_sales.csv")
         trace = out["tool_trace"]
         self.assertEqual([t["tool"] for t in trace], ["mean", "median", "count", "line_plot"])
         self.assertEqual({t["round"] for t in trace}, {1})
@@ -173,7 +173,7 @@ class TestRecovery(unittest.TestCase):
                 self.assertIn("Only the provided tools", r[-1]["error"])
                 return msg(calls=[tc("mean", {"column": "revenue"})])
             return msg(content=f"mean is {r[-1]['value']}")
-        out = run_agent(DF, "q", client=FakeClient(policy))
+        out = run_agent(DF, "q", client=FakeClient(policy),dataset_id="sample_sales.csv")
         self.assertEqual([t["ok"] for t in out["tool_trace"]], [False, True])
         self.assertIn(str(round(DF.revenue.mean(), 4)), out["answer"])
 
@@ -186,7 +186,7 @@ class TestRecovery(unittest.TestCase):
                 self.assertIn("not valid JSON", r[-1]["error"])
                 return msg(calls=[tc("mean", {"column": "revenue"})])
             return msg(content="ok")
-        out = run_agent(DF, "q", client=FakeClient(policy))
+        out = run_agent(DF, "q", client=FakeClient(policy),dataset_id="sample_sales.csv")
         self.assertEqual([t["ok"] for t in out["tool_trace"]], [False, True])
 
     def test_bad_column_error_reaches_model_with_hint(self):
@@ -197,7 +197,7 @@ class TestRecovery(unittest.TestCase):
                 return msg(calls=[tc("mean", {"column": "revenu"})])
             seen["error"] = r[-1].get("error", "")
             return msg(content="sorry")
-        run_agent(DF, "q", client=FakeClient(policy))
+        run_agent(DF, "q", client=FakeClient(policy),dataset_id="sample_sales.csv")
         self.assertIn("Did you mean: revenue", seen["error"])
 
     def test_tool_use_failed_is_retried_with_nudge(self):
@@ -208,10 +208,10 @@ class TestRecovery(unittest.TestCase):
                 return ToolCallFormatError("bad call")
             self.assertIn("malformed", messages[-1]["content"])
             return msg(content="recovered")
-        self.assertEqual(run_agent(DF, "q", client=FakeClient(policy))["answer"], "recovered")
+        self.assertEqual(run_agent(DF, "q", client=FakeClient(policy),dataset_id="sample_sales.csv")["answer"], "recovered")
 
     def test_repeated_format_failures_give_friendly_message(self):
-        out = run_agent(DF, "q", client=FakeClient(lambda m, k: ToolCallFormatError("bad")))
+        out = run_agent(DF, "q", client=FakeClient(lambda m, k: ToolCallFormatError("bad")),dataset_id="sample_sales.csv")
         self.assertIn("trouble forming", out["answer"])
 
     def test_round_limit_forces_a_final_answer_without_tools(self):
@@ -221,34 +221,34 @@ class TestRecovery(unittest.TestCase):
             return msg(calls=[tc("count", {})])
         with mock.patch.dict(os.environ, {"MAX_TOOL_ROUNDS": "3"}):
             client = FakeClient(policy)
-            out = run_agent(DF, "q", client=client)
+            out = run_agent(DF, "q", client=client,dataset_id="sample_sales.csv")
         self.assertEqual(out["answer"], "Here is what I found so far.")
         self.assertEqual(len(out["tool_trace"]), 3)
         self.assertEqual(client.requests[-1]["tool_choice"], "none")
 
     def test_empty_model_reply(self):
-        self.assertEqual(run_agent(DF, "q", client=FakeClient(lambda m, k: msg(content="")))["answer"], FALLBACK_ANSWER)
-        self.assertEqual(run_agent(DF, "q", client=FakeClient(lambda m, k: msg(content=None)))["answer"], FALLBACK_ANSWER)
+        self.assertEqual(run_agent(DF, "q", client=FakeClient(lambda m, k: msg(content="")),dataset_id="sample_sales.csv")["answer"], FALLBACK_ANSWER)
+        self.assertEqual(run_agent(DF, "q", client=FakeClient(lambda m, k: msg(content=None)),dataset_id="sample_sales.csv")["answer"], FALLBACK_ANSWER)
 
     def test_empty_content_after_tools_asks_again_for_text(self):
         def policy(messages, kw):
             if kw.get("tool_choice") == "none":
                 return msg(content="final text")
             return msg(calls=[tc("count", {})]) if not tool_results(messages) else msg(content="")
-        self.assertEqual(run_agent(DF, "q", client=FakeClient(policy))["answer"], "final text")
+        self.assertEqual(run_agent(DF, "q", client=FakeClient(policy),dataset_id="sample_sales.csv")["answer"], "final text")
 
     def test_unexpected_response_shape(self):
         client = FakeClient(lambda m, k: None)
         client.chat.completions.create = lambda **kw: type("R", (), {"choices": []})()
         with self.assertRaises(LLMError):
-            run_agent(DF, "q", client=client)
+            run_agent(DF, "q", client=client,dataset_id="sample_sales.csv")
 
     def test_tool_call_cap(self):
         def policy(messages, kw):
             if kw.get("tool_choice") == "none":
                 return msg(content="stopped")
             return msg(calls=[tc("count", {}) for _ in range(30)])
-        out = run_agent(DF, "q", client=FakeClient(policy))
+        out = run_agent(DF, "q", client=FakeClient(policy),dataset_id="sample_sales.csv")
         self.assertLessEqual(len(out["tool_trace"]), orchestrator.MAX_TOOL_CALLS)
 
 
@@ -287,7 +287,7 @@ class TestGroqSdkWire(unittest.TestCase):
                      "args": {"x": "order_date", "y": "revenue", "resample": "M", "filters": west_filter(top)}}]))
             return httpx.Response(200, json=completion_json(content="All done."))
 
-        out = run_agent(DF, "top region trend", client=groq_on_mock(handler))
+        out = run_agent(DF, "top region trend", client=groq_on_mock(handler),dataset_id="sample_sales.csv")
         self.assertEqual(out["answer"], "All done.")
         self.assertEqual([t["tool"] for t in out["tool_trace"]], ["group_aggregate", "trend_analysis", "line_plot"])
         self.assertEqual([t["parallel"] for t in out["tool_trace"]], [False, True, True])
@@ -295,7 +295,7 @@ class TestGroqSdkWire(unittest.TestCase):
 
         first = seen[0]
         self.assertEqual(first["tool_choice"], "auto")
-        self.assertEqual(len(first["tools"]), 39)
+        self.assertEqual(len(first["tools"]), 42)
         self.assertEqual(first["model"], "llama-3.3-70b-versatile")
         self.assertEqual(first["messages"][0]["role"], "system")
         # assistant tool_calls + tool results were serialised the way the API requires
@@ -317,30 +317,30 @@ class TestGroqSdkWire(unittest.TestCase):
                                                             "code": "tool_use_failed", "failed_generation": "<function=mean>"}})
             self.assertIn("malformed", body["messages"][-1]["content"])
             return httpx.Response(200, json=completion_json(content="fine now"))
-        self.assertEqual(run_agent(DF, "q", client=groq_on_mock(handler))["answer"], "fine now")
+        self.assertEqual(run_agent(DF, "q", client=groq_on_mock(handler),dataset_id="sample_sales.csv")["answer"], "fine now")
 
     def test_http_errors_map_to_friendly_exceptions(self):
         def resp(status, body=None, headers=None):
             return lambda request: httpx.Response(status, json=body or {"error": {"message": "x", "type": "e"}}, headers=headers or {})
         with self.assertRaises(LLMRateLimitError):
-            run_agent(DF, "q", client=groq_on_mock(resp(429, headers={"retry-after": "1"})))
+            run_agent(DF, "q", client=groq_on_mock(resp(429, headers={"retry-after": "1"})),dataset_id="sample_sales.csv")
         with self.assertRaises(LLMError) as ctx:
-            run_agent(DF, "q", client=groq_on_mock(resp(401)))
+            run_agent(DF, "q", client=groq_on_mock(resp(401)),dataset_id="sample_sales.csv")
         self.assertIn("GROQ_API_KEY", str(ctx.exception))
         with self.assertRaises(LLMError):
-            run_agent(DF, "q", client=groq_on_mock(resp(500)))
+            run_agent(DF, "q", client=groq_on_mock(resp(500)),dataset_id="sample_sales.csv")
         with self.assertRaises(LLMError):
-            run_agent(DF, "q", client=groq_on_mock(resp(400)))
+            run_agent(DF, "q", client=groq_on_mock(resp(400)),dataset_id="sample_sales.csv")
 
         def connection_error(request):
             raise httpx.ConnectError("boom", request=request)
         with self.assertRaises(LLMError) as ctx:
-            run_agent(DF, "q", client=groq_on_mock(connection_error))
+            run_agent(DF, "q", client=groq_on_mock(connection_error),dataset_id="sample_sales.csv")
         self.assertNotIn("boom", str(ctx.exception))
 
     def test_model_returning_no_choices(self):
         with self.assertRaises(LLMError):
-            run_agent(DF, "q", client=groq_on_mock(lambda r: httpx.Response(200, json={**completion_json(content="x"), "choices": []})))
+            run_agent(DF, "q", client=groq_on_mock(lambda r: httpx.Response(200, json={**completion_json(content="x"), "choices": []})),dataset_id="sample_sales.csv")
 
 
 class TestApi(unittest.TestCase):
@@ -356,9 +356,9 @@ class TestApi(unittest.TestCase):
     def test_health_tools_schema(self):
         self.assertEqual(self.client.get("/api/health").get_json(), {"status": "ok"})
         tools = self.client.get("/api/tools").get_json()
-        self.assertEqual(tools["count"], 39)
+        self.assertEqual(tools["count"], 42)
         self.assertEqual({t["category"] for t in tools["tools"]}, {"mathematical_operations", "data_manipulation", "data_summary",
-                                                                    "graphs", "correlation_analysis", "outlier_analysis"})
+                                                                    "graphs", "correlation_analysis", "outlier_analysis", "memory"})
         sch = self.client.get("/api/datasets/sample/schema").get_json()
         self.assertEqual(sch["schema"]["n_rows"], 400)
         self.assertIn({"name": "region", "dtype": "str"}["name"], [c["name"] for c in sch["schema"]["columns"]])

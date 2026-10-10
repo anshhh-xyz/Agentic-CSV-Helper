@@ -32,6 +32,7 @@ class ToolError(Exception):
 class ToolContext:
     df: pd.DataFrame  # working copy for this request (never the stored dataset)
     plots_dir: str
+    scope: str = "global"  # dataset_id for this request; used by memory tools
 
 
 @dataclass(frozen=True)

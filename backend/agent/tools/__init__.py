@@ -7,4 +7,5 @@ from agent.tools import (  # noqa: F401
     graphs,
     correlation_analysis,
     outlier_analysis,
+    memory,
 )

@@ -24,6 +24,7 @@ from agent.llm_client import LLMError, LLMRateLimitError
 from agent.orchestrator import run_agent
 from agent.tools._base import ToolContext
 from api.dataset_store import store
+from agent.memory import store as memory_store
 
 logger = logging.getLogger(__name__)
 api_bp = Blueprint("api", __name__)
@@ -80,6 +81,7 @@ def get_schema(dataset_id):
     return jsonify({"dataset_id": dataset_id, "name": store.get_name(dataset_id), "schema": _frontend_schema(df)})
 
 
+
 @api_bp.route("/ask", methods=["POST"])
 def ask():
     body = request.get_json(silent=True) or {}
@@ -96,7 +98,12 @@ def ask():
         return jsonify({"error": "Unknown dataset. Upload a dataset first."}), 404
 
     try:
-        result = run_agent(df, question, verbose=False)
+        facts = memory_store.get_all(dataset_id)
+        extra_context = None
+        if facts:
+            lines = [f"- ({f['kind']}) {f['key']}: {f['value']}" for f in facts]
+            extra_context = "Remembered facts for this dataset:\n" + "\n".join(lines)
+        result = run_agent(df, question, verbose=False, dataset_id=dataset_id, extra_context=extra_context)
     except RuntimeError as e:  # missing GROQ_API_KEY: a setup message, safe to show
         return jsonify({"error": str(e)}), 500
     except LLMRateLimitError as e:
@@ -119,3 +126,14 @@ def ask():
 @api_bp.route("/plots/<path:filename>", methods=["GET"])
 def get_plot(filename):
     return send_from_directory(PLOTS_DIR, filename)
+
+@api_bp.route("/memory/<dataset_id>", methods=["GET"])
+def get_memory(dataset_id):
+    return jsonify({"memory": memory_store.get_all(dataset_id)})
+
+@api_bp.route("/memory/<dataset_id>/<key>", methods=["DELETE"])
+def delete_memory(dataset_id, key):
+    removed = memory_store.delete(dataset_id, key)
+    if not removed:
+        return jsonify({"error": f"Nothing is remembered under '{key}'."}), 404
+    return jsonify({"deleted": key})
