@@ -1,292 +1,504 @@
-// -----------------------------------------------------------------------
-// Configuration
-// -----------------------------------------------------------------------
-// Change this if your backend runs somewhere other than localhost:5000
-// (e.g. a deployed URL). Nothing else in this file needs to change.
+// ---------------------------------------------------------------------------
+// Configuration: change this if the backend runs somewhere else.
+// ---------------------------------------------------------------------------
 const API_BASE = "http://localhost:5000";
 
-// -----------------------------------------------------------------------
+const STORAGE_KEY = "da.dataset";
+const FALLBACK_DATASET = "sample"; // bundled example the backend preloads
+const JSON_HEADERS = { "Content-Type": "application/json" };
+
+// ---------------------------------------------------------------------------
 // State
-// -----------------------------------------------------------------------
-let currentDatasetId = "sample";
+// ---------------------------------------------------------------------------
+let datasetId = null;
+let datasetName = "";
+let busy = false;
+let activeSaveBar = null; // only the latest "save changes" action is valid
+let retryTimer = null;
 
-// -----------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 // Elements
-// -----------------------------------------------------------------------
-const fileInput = document.getElementById("file-input");
-const uploadLabel = document.getElementById("upload-label");
-const datasetInfo = document.getElementById("dataset-info");
-const schemaList = document.getElementById("schema-list");
-const statusDot = document.getElementById("status-dot");
-const statusText = document.getElementById("status-text");
-const apiBaseDisplay = document.getElementById("api-base-display");
-const activeDatasetName = document.getElementById("active-dataset-name");
-const activeDatasetMeta = document.getElementById("active-dataset-meta");
-const chatThread = document.getElementById("chat-thread");
-const emptyState = document.getElementById("empty-state");
-const chatForm = document.getElementById("chat-form");
-const chatInput = document.getElementById("chat-input");
-const askButton = document.getElementById("ask-button");
+// ---------------------------------------------------------------------------
+const $ = (id) => document.getElementById(id);
 
-apiBaseDisplay.textContent = API_BASE;
+const uploadBtn = $("upload-btn");
+const fileInput = $("file-input");
+const datasetNameEl = $("dataset-name");
+const datasetMetaEl = $("dataset-meta");
+const columnsEl = $("columns");
+const memoryBlock = $("memory-block");
+const memoryEl = $("memory");
+const banner = $("banner");
+const thread = $("thread");
+const stream = $("stream");
+const emptyEl = $("empty");
+const composer = $("composer");
+const questionEl = $("question");
+const askBtn = $("ask-btn");
+const overlay = $("overlay");
+const modalFile = $("modal-file");
+const resolveSame = $("resolve-same");
+const resolveNew = $("resolve-new");
 
-// -----------------------------------------------------------------------
-// Backend health check
-// -----------------------------------------------------------------------
-async function checkHealth() {
+// ---------------------------------------------------------------------------
+// API
+// ---------------------------------------------------------------------------
+async function api(path, options = {}) {
+  let res;
   try {
-    const res = await fetch(`${API_BASE}/api/health`);
-    if (!res.ok) throw new Error();
-    statusDot.classList.add("online");
-    statusDot.classList.remove("offline");
-    statusText.textContent = "connected";
+    res = await fetch(API_BASE + path, options);
   } catch {
-    statusDot.classList.add("offline");
-    statusDot.classList.remove("online");
-    statusText.textContent = "not reachable";
+    throw new Error(`Can't reach the backend at ${API_BASE}. Start it with "python run_api.py".`);
   }
-}
 
-// -----------------------------------------------------------------------
-// Schema rendering
-// -----------------------------------------------------------------------
-function renderSchema(schema, datasetName) {
-  activeDatasetName.textContent = datasetName;
-  activeDatasetMeta.textContent = `${schema.n_rows} rows · ${schema.n_columns} columns`;
-
-  datasetInfo.innerHTML = `
-    <div class="name">${escapeHtml(datasetName)}</div>
-    <div class="meta">${schema.n_rows} rows &middot; ${schema.n_columns} columns</div>
-  `;
-
-  schemaList.innerHTML = schema.columns
-    .map(
-      (col) => `
-      <div class="schema-row">
-        <span class="col-name">${escapeHtml(col.name)}</span>
-        <span class="col-type">${escapeHtml(col.dtype)}</span>
-      </div>`
-    )
-    .join("");
-}
-
-async function loadSchema(datasetId, displayName) {
+  let data = null;
   try {
-    const res = await fetch(`${API_BASE}/api/datasets/${datasetId}/schema`);
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Failed to load schema.");
-    renderSchema(data.schema, displayName || data.name);
-  } catch (err) {
-    datasetInfo.innerHTML = `<p class="dim">Couldn't load dataset info: ${escapeHtml(err.message)}</p>`;
+    data = await res.json();
+  } catch {
+    /* non-JSON body */
   }
+
+  if (!res.ok) {
+    const err = new Error((data && data.error) || `Request failed (${res.status}).`);
+    err.status = res.status;
+    throw err;
+  }
+  return data;
 }
 
-// -----------------------------------------------------------------------
-// File upload
-// -----------------------------------------------------------------------
-fileInput.addEventListener("change", async () => {
-  const file = fileInput.files[0];
-  if (!file) return;
+// ---------------------------------------------------------------------------
+// Small helpers
+// ---------------------------------------------------------------------------
+function escapeHtml(text) {
+  return String(text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
 
-  uploadLabel.textContent = "Uploading…";
+function scrollToEnd() {
+  thread.scrollTop = thread.scrollHeight;
+}
 
-  const formData = new FormData();
-  formData.append("file", file);
-
+function saveDatasetId(id) {
   try {
-    const res = await fetch(`${API_BASE}/api/upload`, {
-      method: "POST",
-      body: formData,
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Upload failed.");
-
-    currentDatasetId = data.dataset_id;
-    renderSchema(data.schema, data.name);
-    clearChat();
-    addSystemNotice(`Switched to "${data.name}". Ask away.`);
-  } catch (err) {
-    addSystemNotice(`Upload failed: ${err.message}`, true);
-  } finally {
-    uploadLabel.textContent = "Upload CSV";
-    fileInput.value = "";
-  }
-});
-
-// -----------------------------------------------------------------------
-// Chat
-// -----------------------------------------------------------------------
-function clearChat() {
-  chatThread.innerHTML = "";
-}
-
-function hideEmptyState() {
-  if (emptyState && emptyState.parentNode) {
-    emptyState.remove();
+    localStorage.setItem(STORAGE_KEY, id);
+  } catch {
+    /* storage unavailable: fine, we just won't remember it */
   }
 }
 
-function addUserMessage(text) {
-  hideEmptyState();
-  const el = document.createElement("div");
-  el.className = "message user";
-  el.textContent = text;
-  chatThread.appendChild(el);
-  chatThread.scrollTop = chatThread.scrollHeight;
-  return el;
+function readSavedDatasetId() {
+  try {
+    return localStorage.getItem(STORAGE_KEY);
+  } catch {
+    return null;
+  }
 }
 
-// -----------------------------------------------------------------------
-// Analysis trace (which tools the agent ran, in order)
-// -----------------------------------------------------------------------
-function formatArgs(args) {
-  const parts = [];
-  Object.entries(args || {}).forEach(([key, value]) => {
-    if (key === "filters" && Array.isArray(value)) {
-      parts.push(value.map((f) => `${f.column} ${f.operator} ${f.value ?? ""}`.trim()).join(" & "));
-    } else if (typeof value === "object" && value !== null) {
-      parts.push(`${key}=${JSON.stringify(value)}`);
+function showBanner(message) {
+  banner.textContent = message;
+  banner.hidden = false;
+}
+
+function hideBanner() {
+  banner.hidden = true;
+}
+
+function setBusy(value) {
+  busy = value;
+  askBtn.disabled = value;
+  questionEl.disabled = value;
+  uploadBtn.disabled = value;
+}
+
+// ---------------------------------------------------------------------------
+// Markdown (small and safe): text is escaped first, then a few tags are added
+// ---------------------------------------------------------------------------
+function inline(text) {
+  return escapeHtml(text)
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+}
+
+const TABLE_ROW = /^\s*\|.*\|\s*$/;
+
+function renderTable(rows) {
+  const cells = (row) => row.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+  const isSeparator = (row) => /^\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?$/.test(row.trim());
+  const data = rows.filter((r) => !isSeparator(r)).map(cells);
+  if (!data.length) return "";
+  const [head, ...body] = data;
+  const th = head.map((c) => `<th>${inline(c)}</th>`).join("");
+  const tr = body.map((r) => `<tr>${r.map((c) => `<td>${inline(c)}</td>`).join("")}</tr>`).join("");
+  return `<div class="table-wrap"><table><thead><tr>${th}</tr></thead><tbody>${tr}</tbody></table></div>`;
+}
+
+function renderMarkdown(source) {
+  const lines = String(source).replace(/\r\n/g, "\n").split("\n");
+  const out = [];
+  let paragraph = [];
+  let list = null;
+
+  const flushParagraph = () => {
+    if (paragraph.length) {
+      out.push("<p>" + paragraph.map(inline).join("<br>") + "</p>");
+      paragraph = [];
+    }
+  };
+  const closeList = () => {
+    if (list) {
+      out.push(`</${list}>`);
+      list = null;
+    }
+  };
+
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i].trimEnd();
+
+    if (!line.trim()) {
+      flushParagraph();
+      closeList();
+      i++;
+      continue;
+    }
+
+    if (TABLE_ROW.test(line)) {
+      flushParagraph();
+      closeList();
+      const rows = [];
+      while (i < lines.length && TABLE_ROW.test(lines[i])) rows.push(lines[i++]);
+      out.push(renderTable(rows));
+      continue;
+    }
+
+    const bullet = line.match(/^\s*[-*\u2022]\s+(.*)$/);
+    const numbered = line.match(/^\s*\d+[.)]\s+(.*)$/);
+    if (bullet || numbered) {
+      flushParagraph();
+      const type = bullet ? "ul" : "ol";
+      if (list !== type) {
+        closeList();
+        out.push(`<${type}>`);
+        list = type;
+      }
+      out.push("<li>" + inline((bullet || numbered)[1]) + "</li>");
+      i++;
+      continue;
+    }
+
+    closeList();
+    const heading = line.match(/^\s{0,3}#{1,6}\s+(.*)$/);
+    if (heading) {
+      flushParagraph();
+      out.push('<p class="md-heading">' + inline(heading[1]) + "</p>");
     } else {
-      parts.push(`${key}=${value}`);
+      paragraph.push(line);
     }
-  });
-  const text = parts.join(", ");
-  return text.length > 90 ? text.slice(0, 87) + "…" : text;
+    i++;
+  }
+
+  flushParagraph();
+  closeList();
+  return out.join("");
 }
 
-function renderTrace(trace) {
-  const details = document.createElement("details");
-  details.className = "analysis";
-  details.open = true;
+// ---------------------------------------------------------------------------
+// Sidebar: dataset, columns, memory
+// ---------------------------------------------------------------------------
+function renderDataset(name, schema) {
+  datasetName = name;
+  datasetNameEl.textContent = name.replace(/\s*\(.*\)\s*$/, "");
+  datasetMetaEl.textContent = `${schema.n_rows} rows \u00d7 ${schema.n_columns} columns`;
 
-  const failed = trace.filter((t) => !t.ok).length;
-  const summary = document.createElement("summary");
-  summary.textContent =
-    `Analysis · ${trace.length} step${trace.length === 1 ? "" : "s"}` + (failed ? ` · ${failed} failed` : "");
-  details.appendChild(summary);
-
-  trace.forEach((t) => {
-    const row = document.createElement("div");
-    row.className = "step" + (t.ok ? "" : " failed") + (t.parallel ? " parallel" : "");
-
-    const mark = document.createElement("span");
-    mark.className = "step-mark";
-    mark.textContent = t.ok ? "✓" : "✗";
-
-    const body = document.createElement("div");
-    body.className = "step-body";
-
-    const head = document.createElement("div");
-    const name = document.createElement("span");
-    name.className = "step-name";
-    name.textContent = t.tool;
-    head.appendChild(name);
-    if (t.parallel) {
-      const tag = document.createElement("span");
-      tag.className = "step-tag";
-      tag.textContent = "parallel";
-      head.appendChild(tag);
-    }
-    body.appendChild(head);
-
-    const detail = document.createElement("div");
-    detail.className = "step-detail";
-    detail.textContent = t.ok ? t.summary || formatArgs(t.arguments) : t.error || "failed";
-    body.appendChild(detail);
-
-    const args = formatArgs(t.arguments);
-    if (args) {
-      const a = document.createElement("div");
-      a.className = "step-args";
-      a.textContent = args;
-      body.appendChild(a);
-    }
-
-    row.appendChild(mark);
-    row.appendChild(body);
-    details.appendChild(row);
+  columnsEl.innerHTML = "";
+  (schema.columns || []).forEach((col) => {
+    const li = document.createElement("li");
+    const nameEl = document.createElement("span");
+    nameEl.className = "name";
+    nameEl.textContent = col.name;
+    const kindEl = document.createElement("span");
+    kindEl.className = "kind";
+    kindEl.textContent = col.kind || col.dtype;
+    li.append(nameEl, kindEl);
+    columnsEl.appendChild(li);
   });
-  return details;
 }
 
-function addAgentMessage({ text, pending = false, error = false, toolTrace = [], plotUrls = [] }) {
-  hideEmptyState();
+function renderMemory(items) {
+  memoryEl.innerHTML = "";
+  memoryBlock.hidden = items.length === 0;
+
+  items.forEach((item) => {
+    const li = document.createElement("li");
+
+    const key = document.createElement("div");
+    key.className = "key";
+    key.textContent = String(item.key).replace(/_/g, " ");
+
+    const value = document.createElement("div");
+    value.className = "value";
+    value.textContent = typeof item.value === "string" ? item.value : JSON.stringify(item.value);
+
+    const forget = document.createElement("button");
+    forget.type = "button";
+    forget.className = "forget";
+    forget.textContent = "\u00d7";
+    forget.setAttribute("aria-label", `Forget ${item.key}`);
+    forget.addEventListener("click", () => forgetFact(item.key));
+
+    li.append(key, value, forget);
+    memoryEl.appendChild(li);
+  });
+}
+
+async function loadMemory() {
+  if (!datasetId) return;
+  try {
+    const data = await api(`/api/memory/${encodeURIComponent(datasetId)}`);
+    renderMemory(data.memory || []);
+  } catch {
+    /* the panel is optional: stay quiet if it can't load */
+  }
+}
+
+async function forgetFact(key) {
+  try {
+    await api(`/api/memory/${encodeURIComponent(datasetId)}/${encodeURIComponent(key)}`, { method: "DELETE" });
+  } catch {
+    /* already gone, or backend down: refreshing shows the truth */
+  }
+  loadMemory();
+}
+
+// ---------------------------------------------------------------------------
+// Chat
+// ---------------------------------------------------------------------------
+function hideEmpty() {
+  if (emptyEl) emptyEl.hidden = true;
+}
+
+function clearChat() {
+  stream.querySelectorAll(".msg").forEach((el) => el.remove());
+  activeSaveBar = null;
+  if (emptyEl) emptyEl.hidden = false;
+}
+
+function addUser(text) {
+  hideEmpty();
   const el = document.createElement("div");
-  el.className = "message agent" + (pending ? " pending" : "") + (error ? " error" : "");
+  el.className = "msg user";
   el.textContent = text;
+  stream.appendChild(el);
+  scrollToEnd();
+}
 
-  plotUrls.forEach((url) => {
+function addAgent({ text, pending = false, error = false, plots = [] }) {
+  hideEmpty();
+  const el = document.createElement("div");
+  el.className = "msg agent" + (pending ? " pending" : "") + (error ? " error" : "");
+
+  const body = document.createElement("div");
+  body.className = "md";
+  if (pending || error) body.textContent = text;
+  else body.innerHTML = renderMarkdown(text);
+  el.appendChild(body);
+
+  plots.forEach((url) => {
     const img = document.createElement("img");
-    img.src = `${API_BASE}${url}`;
-    img.alt = "Generated chart";
+    img.alt = "Chart";
+    img.addEventListener("load", scrollToEnd);
+    img.src = API_BASE + url;
     el.appendChild(img);
   });
 
-  if (toolTrace.length > 0) {
-    el.appendChild(renderTrace(toolTrace));
-  }
-
-  chatThread.appendChild(el);
-  chatThread.scrollTop = chatThread.scrollHeight;
+  stream.appendChild(el);
+  scrollToEnd();
   return el;
 }
 
-function addSystemNotice(text, error = false) {
-  addAgentMessage({ text, error });
+function removeSaveBar() {
+  if (activeSaveBar) {
+    activeSaveBar.remove();
+    activeSaveBar = null;
+  }
 }
 
-chatForm.addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const question = chatInput.value.trim();
-  if (!question) return;
+function attachSaveBar(messageEl) {
+  removeSaveBar();
 
-  addUserMessage(question);
-  chatInput.value = "";
-  askButton.disabled = true;
+  const bar = document.createElement("div");
+  bar.className = "save-bar";
 
-  const pendingEl = addAgentMessage({ text: "Analysing…", pending: true });
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "btn btn-small";
+  button.textContent = "Save changes to dataset";
+  bar.appendChild(button);
+
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    try {
+      const data = await api(`/api/commit/${encodeURIComponent(datasetId)}`, { method: "POST" });
+      renderDataset(datasetName, data.schema);
+      bar.innerHTML = '<span class="saved">Saved to dataset</span>';
+      if (activeSaveBar === bar) activeSaveBar = null;
+    } catch (err) {
+      button.disabled = false;
+      const note = document.createElement("span");
+      note.className = "save-error";
+      note.textContent = err.message;
+      bar.appendChild(note);
+    }
+  });
+
+  messageEl.appendChild(bar);
+  activeSaveBar = bar;
+  scrollToEnd();
+}
+
+async function ask(question) {
+  if (busy || !datasetId || !question) return;
+
+  addUser(question);
+  questionEl.value = "";
+  setBusy(true);
+  const pending = addAgent({ text: "Analysing\u2026", pending: true });
 
   try {
-    const res = await fetch(`${API_BASE}/api/ask`, {
+    const data = await api("/api/ask", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ dataset_id: currentDatasetId, question }),
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ dataset_id: datasetId, question }),
     });
-    const data = await res.json();
-    pendingEl.remove();
+    pending.remove();
+    const message = addAgent({ text: data.answer, plots: data.plot_urls || [] });
+    if (data.data_changed) attachSaveBar(message);
+    loadMemory(); // the agent may have remembered or forgotten something
+  } catch (err) {
+    pending.remove();
+    addAgent({ text: err.message, error: true });
+  } finally {
+    setBusy(false);
+    questionEl.focus();
+  }
+}
 
-    if (!res.ok) {
-      addAgentMessage({ text: data.error || "The agent could not answer that.", error: true });
-    } else {
-      addAgentMessage({
-        text: data.answer,
-        toolTrace: data.tool_trace || [],
-        plotUrls: data.plot_urls || [],
+composer.addEventListener("submit", (event) => {
+  event.preventDefault();
+  ask(questionEl.value.trim());
+});
+
+document.querySelectorAll(".example").forEach((button) => {
+  button.addEventListener("click", () => ask(button.textContent.trim()));
+});
+
+// ---------------------------------------------------------------------------
+// Dataset switching and uploads
+// ---------------------------------------------------------------------------
+function setDataset({ dataset_id, name, schema }) {
+  const changed = dataset_id !== datasetId;
+  datasetId = dataset_id;
+  saveDatasetId(dataset_id);
+  renderDataset(name, schema);
+  hideBanner();
+  removeSaveBar(); // a pending edit belongs to the previous data
+  if (changed) clearChat();
+  loadMemory();
+}
+
+function askResolution(filename) {
+  return new Promise((resolve) => {
+    modalFile.textContent = filename;
+    overlay.hidden = false;
+    resolveSame.focus();
+
+    const finish = (choice) => {
+      overlay.hidden = true;
+      resolveSame.removeEventListener("click", onSame);
+      resolveNew.removeEventListener("click", onNew);
+      overlay.removeEventListener("click", onBackdrop);
+      document.removeEventListener("keydown", onKey);
+      resolve(choice);
+    };
+    const onSame = () => finish("continue");
+    const onNew = () => finish("new");
+    const onBackdrop = (event) => event.target === overlay && finish(null);
+    const onKey = (event) => event.key === "Escape" && finish(null);
+
+    resolveSame.addEventListener("click", onSame);
+    resolveNew.addEventListener("click", onNew);
+    overlay.addEventListener("click", onBackdrop);
+    document.addEventListener("keydown", onKey);
+  });
+}
+
+uploadBtn.addEventListener("click", () => fileInput.click());
+
+fileInput.addEventListener("change", async () => {
+  const file = fileInput.files && fileInput.files[0];
+  fileInput.value = "";
+  if (!file) return;
+
+  setBusy(true);
+  uploadBtn.textContent = "Uploading\u2026";
+
+  try {
+    const form = new FormData();
+    form.append("file", file);
+    let result = await api("/api/upload", { method: "POST", body: form });
+
+    if (result.status === "needs_resolution") {
+      const choice = await askResolution(result.filename || file.name);
+      if (!choice) return; // cancelled: nothing changes
+      result = await api("/api/upload/resolve", {
+        method: "POST",
+        headers: JSON_HEADERS,
+        body: JSON.stringify({
+          new_dataset_id: result.new_dataset_id,
+          previous_dataset_id: result.previous_dataset_id,
+          choice,
+        }),
       });
     }
+
+    setDataset(result);
   } catch (err) {
-    pendingEl.remove();
-    addAgentMessage({
-      text: `Couldn't reach the backend at ${API_BASE}. Make sure run_api.py is running.`,
-      error: true,
-    });
+    addAgent({ text: err.message, error: true });
   } finally {
-    askButton.disabled = false;
-    chatInput.focus();
+    uploadBtn.textContent = "Upload CSV";
+    setBusy(false);
   }
 });
 
-// -----------------------------------------------------------------------
-// Utilities
-// -----------------------------------------------------------------------
-function escapeHtml(str) {
-  const div = document.createElement("div");
-  div.textContent = str;
-  return div.innerHTML;
+// ---------------------------------------------------------------------------
+// Start-up: reopen the last dataset if the server still has it, else the sample
+// ---------------------------------------------------------------------------
+async function init() {
+  clearTimeout(retryTimer);
+
+  const saved = readSavedDatasetId();
+  const candidates = saved && saved !== FALLBACK_DATASET ? [saved, FALLBACK_DATASET] : [FALLBACK_DATASET];
+
+  for (const id of candidates) {
+    try {
+      const data = await api(`/api/datasets/${encodeURIComponent(id)}/schema`);
+      setDataset({ dataset_id: id, name: data.name, schema: data.schema });
+      return;
+    } catch (err) {
+      if (!err.status) {
+        // network error: the backend isn't running yet, keep trying quietly
+        showBanner(err.message);
+        retryTimer = setTimeout(init, 3000);
+        return;
+      }
+      // 404: that dataset is gone (server restarted), try the next one
+    }
+  }
+  showBanner("No dataset available. Upload a CSV to begin.");
 }
 
-// -----------------------------------------------------------------------
-// Init
-// -----------------------------------------------------------------------
-checkHealth();
-loadSchema(currentDatasetId, "sample_sales.csv (bundled example)");
+init();

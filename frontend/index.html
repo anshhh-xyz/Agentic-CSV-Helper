@@ -2,82 +2,76 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Data Analysis Agent</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Data Analyst</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>
 
-<div class="layout">
+<div class="app">
 
-  <aside class="sidebar">
-    <div class="sidebar-header">
-      <h1>Data Analysis Agent</h1>
-      <p class="tagline">Ask questions about a dataset. Every answer comes from a real computation, not a guess.</p>
-    </div>
+  <aside class="side">
+    <div class="brand">Data Analyst</div>
 
-    <div class="panel">
-      <h2>Dataset</h2>
-      <label class="upload-control" for="file-input">
-        <span id="upload-label">Upload CSV</span>
-        <input type="file" id="file-input" accept=".csv" hidden />
-      </label>
-      <div id="dataset-info" class="dataset-info">
-        <p class="dim">Loading bundled sample…</p>
+    <div class="banner" id="banner" role="alert" hidden></div>
+
+    <section class="block">
+      <button type="button" class="btn btn-block" id="upload-btn">Upload CSV</button>
+      <input type="file" id="file-input" accept=".csv" hidden />
+      <div class="dataset">
+        <div class="dataset-name" id="dataset-name"></div>
+        <div class="dataset-meta" id="dataset-meta"></div>
       </div>
-    </div>
+    </section>
 
-    <div class="panel panel-grow">
+    <section class="block block-columns">
       <h2>Columns</h2>
-      <div id="schema-list" class="schema-list">
-        <p class="dim">—</p>
-      </div>
-    </div>
+      <ul class="columns" id="columns"></ul>
+    </section>
 
-    <div class="panel">
-      <h2>Connection</h2>
-      <div class="status-row">
-        <span id="status-dot" class="status-dot"></span>
-        <span id="status-text" class="mono dim">checking backend…</span>
-      </div>
-      <p class="hint">Backend must be running at <code id="api-base-display" class="mono"></code></p>
-    </div>
+    <section class="block block-memory" id="memory-block" hidden>
+      <h2>Memory</h2>
+      <ul class="memory" id="memory"></ul>
+    </section>
   </aside>
 
   <main class="main">
-    <div class="chat-header">
-      <span id="active-dataset-name">sample_sales.csv</span>
-      <span class="chat-header-sub mono dim" id="active-dataset-meta"></span>
-    </div>
-
-    <div class="chat-thread" id="chat-thread">
-      <div class="empty-state" id="empty-state">
-        <p>Try asking:</p>
-        <ul>
-          <li>What columns are in this dataset?</li>
-          <li>What's the average revenue by region?</li>
-          <li>Are there any outliers in revenue?</li>
-          <li>Show me a bar chart of revenue by category</li>
-          <li>Find the region with the highest average revenue and plot its monthly trend</li>
-          <li>Give me the average and median revenue, and plot revenue over time</li>
-        </ul>
+    <div class="thread" id="thread">
+      <div class="stream" id="stream" aria-live="polite">
+        <div class="empty" id="empty">
+          <h1>Ask your data anything.</h1>
+          <div class="examples">
+            <button type="button" class="example">What does this dataset contain?</button>
+            <button type="button" class="example">Is the data clean, or are values missing?</button>
+            <button type="button" class="example">Show the strongest relationship and plot it.</button>
+          </div>
+        </div>
       </div>
     </div>
 
-    <form class="chat-input-row" id="chat-form">
-      <input
-        type="text"
-        id="chat-input"
-        class="chat-input"
-        placeholder="Ask a question about this data…"
-        autocomplete="off"
-      />
-      <button type="submit" class="ask-button" id="ask-button">Ask</button>
-    </form>
+    <div class="composer-wrap">
+      <form class="composer" id="composer" autocomplete="off">
+        <input type="text" id="question" placeholder="Ask a question" aria-label="Question" />
+        <button type="submit" class="btn" id="ask-btn">Ask</button>
+      </form>
+    </div>
   </main>
 
+</div>
+
+<div class="overlay" id="overlay" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <h3 id="modal-title">Same dataset?</h3>
+    <p><strong id="modal-file"></strong> was analysed before. Is this an updated version of it, or a different dataset?</p>
+    <p class="muted">The same dataset keeps what was remembered. A different one starts fresh.</p>
+    <div class="modal-actions">
+      <button type="button" class="btn" id="resolve-same">Same dataset</button>
+      <button type="button" class="btn btn-ghost" id="resolve-new">Different dataset</button>
+    </div>
+  </div>
 </div>
 
 <script src="script.js"></script>

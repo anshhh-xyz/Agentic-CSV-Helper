@@ -7,7 +7,8 @@ import tempfile
 import time
 import unittest
 from unittest import mock
-
+import uuid
+import tempfile
 import httpx
 import pandas as pd
 
@@ -349,6 +350,26 @@ class TestApi(unittest.TestCase):
         from api.app import create_app
         cls.app = create_app()
         cls.client = cls.app.test_client()
+    
+    def setUp(self):
+        # Memory writes go to a throwaway DB, never the real data/memory.db
+        self._mem_tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        self._mem_tmp.close()
+        self._mem_patch = mock.patch("agent.memory.store.MEMORY_DB_PATH", self._mem_tmp.name)
+        self._mem_patch.start()
+
+    def tearDown(self):
+        self._mem_patch.stop()
+        os.unlink(self._mem_tmp.name)
+
+    def unique_csv(self):
+        """(filename, content_v1, content_v2), unique per call."""
+        token = uuid.uuid4().hex[:10]
+        return f"{token}.csv", f"a,b\n{token},1\n".encode(), f"a,b\n{token},2\n".encode()
+
+    def upload(self, content, filename):
+        return self.client.post("/api/upload", data={"file": (io.BytesIO(content), filename)},
+                                content_type="multipart/form-data")
 
     def with_llm(self, handler):
         return mock.patch("agent.orchestrator.get_client", return_value=groq_on_mock(handler))
@@ -388,7 +409,7 @@ class TestApi(unittest.TestCase):
             r = self.client.post("/api/ask", json={"dataset_id": "sample", "question": "avg revenue and a chart"})
         data = r.get_json()
         self.assertEqual(r.status_code, 200, data)
-        self.assertEqual(set(data), {"answer", "tool_trace", "plot_urls", "rounds"})
+        self.assertEqual(set(data), {"answer", "tool_trace", "plot_urls", "rounds", "data_changed"})
         self.assertEqual([t["tool"] for t in data["tool_trace"]], ["mean", "bar_plot"])
         self.assertTrue(all({"tool", "arguments", "ok", "summary", "parallel", "round", "duration_ms"} <= set(t) for t in data["tool_trace"]))
         self.assertEqual(len(data["plot_urls"]), 1)
@@ -414,6 +435,78 @@ class TestApi(unittest.TestCase):
             r = ask({"dataset_id": "sample", "question": "hi"})
         self.assertEqual(r.status_code, 500)
         self.assertNotIn("secret", r.get_json()["error"])
+
+    def test_reupload_same_bytes_reuses_id(self):
+        name, v1, _ = self.unique_csv()
+        r1, r2 = self.upload(v1, name), self.upload(v1, name)
+        self.assertEqual(r1.get_json()["status"], "new")
+        self.assertEqual(r2.get_json()["status"], "existing")
+        self.assertEqual(r1.get_json()["dataset_id"], r2.get_json()["dataset_id"])
+
+    def test_same_filename_different_content_needs_resolution(self):
+        name, v1, v2 = self.unique_csv()
+        r1, r2 = self.upload(v1, name), self.upload(v2, name)
+        self.assertEqual(r2.get_json()["status"], "needs_resolution")
+        self.assertEqual(r2.get_json()["previous_dataset_id"], r1.get_json()["dataset_id"])
+
+    def test_resolve_continue_keeps_dataset_id_and_memory(self):
+        from agent.memory import store as mem
+        name, v1, v2 = self.unique_csv()
+        id1 = self.upload(v1, name).get_json()["dataset_id"]
+        mem.upsert(id1, "preference", "k", "v")
+        new_id = self.upload(v2, name).get_json()["new_dataset_id"]
+        r = self.client.post("/api/upload/resolve",
+                             json={"new_dataset_id": new_id, "previous_dataset_id": id1, "choice": "continue"})
+        self.assertEqual(r.get_json()["dataset_id"], id1)
+        self.assertEqual(len(mem.get_all(id1)), 1)
+
+    def test_resolve_new_gets_independent_memory(self):
+        from agent.memory import store as mem
+        name, v1, v2 = self.unique_csv()
+        id1 = self.upload(v1, name).get_json()["dataset_id"]
+        mem.upsert(id1, "preference", "k", "v")
+        new_id = self.upload(v2, name).get_json()["new_dataset_id"]
+        r = self.client.post("/api/upload/resolve",
+                             json={"new_dataset_id": new_id, "previous_dataset_id": id1, "choice": "new"})
+        self.assertEqual(r.get_json()["dataset_id"], new_id)
+        self.assertEqual(mem.get_all(new_id), [])
+        self.assertEqual(len(mem.get_all(id1)), 1)
+
+    def test_resolve_twice_404s(self):
+        name, v1, v2 = self.unique_csv()
+        id1 = self.upload(v1, name).get_json()["dataset_id"]
+        new_id = self.upload(v2, name).get_json()["new_dataset_id"]
+        body = {"new_dataset_id": new_id, "previous_dataset_id": id1, "choice": "continue"}
+        self.assertEqual(self.client.post("/api/upload/resolve", json=body).status_code, 200)
+        self.assertEqual(self.client.post("/api/upload/resolve", json=body).status_code, 404)
+
+    def test_commit_requires_pending_changes(self):
+        name, v1, _ = self.unique_csv()
+        id1 = self.upload(v1, name).get_json()["dataset_id"]
+        self.assertEqual(self.client.post(f"/api/commit/{id1}").status_code, 400)
+
+    def test_mutation_then_commit_persists(self):
+        name, _, _ = self.unique_csv()
+        csv = f"a,b\n{name[:-4]},\n2,5\n3,\n".encode()   # column b has 2 missing values
+        did = self.upload(csv, name).get_json()["dataset_id"]
+
+        def handler(request):
+            body = json.loads(request.content)
+            if not any(m["role"] == "tool" for m in body["messages"]):
+                return httpx.Response(200, json=completion_json(tool_calls=[
+                    {"id": "c1", "name": "fill_missing", "args": {"strategy": "constant", "columns": ["b"], "value": 0}}]))
+            return httpx.Response(200, json=completion_json(content="Filled."))
+
+        missing = lambda: next(c for c in self.client.get(f"/api/datasets/{did}/schema").get_json()["schema"]["columns"]
+                               if c["name"] == "b")["missing"]
+        self.assertEqual(missing(), 2)
+        with self.with_llm(handler):
+            data = self.client.post("/api/ask", json={"dataset_id": did, "question": "fill b"}).get_json()
+        self.assertTrue(data["data_changed"])
+        self.assertEqual(missing(), 2)                       # NOT permanent yet
+        self.assertEqual(self.client.post(f"/api/commit/{did}").status_code, 200)
+        self.assertEqual(missing(), 0)                       # now permanent
+        self.assertEqual(self.client.post(f"/api/commit/{did}").status_code, 400)
 
     def test_cors_headers_for_frontend(self):
         r = self.client.options("/api/ask", headers={"Origin": "http://localhost:8080", "Access-Control-Request-Method": "POST"})

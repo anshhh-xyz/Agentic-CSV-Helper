@@ -20,7 +20,7 @@ Rules:
 5. fill_missing, drop_missing, remove_duplicates, rename_columns, convert_dtype and select_columns change the working data for this request only.
 6. If a tool returns an error, read it, fix the arguments and retry once, or use another tool. If it still cannot be done, say so plainly.
 7. Charts are shown to the user automatically. Describe what they show; never mention file paths.
-8. Final answer: short and direct, plain language, numbers rounded sensibly, assumptions stated. If the request is ambiguous, ask one brief clarifying question."""
+8. Final answer: short and direct, plain language, numbers rounded sensibly, assumptions stated. Never mention tools, functions or internal steps. Use short paragraphs, and "-" bullets or a markdown table only when listing several values. If the request is ambiguous, ask one brief clarifying question."""
 
 
 def _fmt(v) -> str:

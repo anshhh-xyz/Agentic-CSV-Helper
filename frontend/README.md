@@ -1,60 +1,31 @@
-# Data Analysis Agent — Frontend
+# Data Analyst: Frontend
 
-A plain HTML/CSS/JS chat interface for the backend agent (see the sibling
-`backend/` project). No build step, no framework — just three files.
+Plain HTML, CSS and JavaScript. No build step, no dependencies.
 
-```
-frontend/
-├── index.html
-├── style.css
-└── script.js
-```
+## Run
 
-## Setup
+1. Start the backend from the `backend/` folder: `python run_api.py`
+2. Open `index.html` in a browser (double-click it), or serve the folder:
+   `python -m http.server 8080` then visit http://localhost:8080
 
-Open `script.js` and confirm `API_BASE` points at your running backend:
-
-```js
-const API_BASE = "http://localhost:5000";
-```
-
-That's the only configuration needed.
-
-## Running it
-
-1. Start the backend first (from the `backend/` folder):
-   ```bash
-   python run_api.py
-   ```
-2. Open `frontend/index.html` directly in a browser (double-click it), or
-   serve it with any static file server, e.g.:
-   ```bash
-   cd frontend
-   python -m http.server 8080
-   ```
-   then visit `http://localhost:8080`.
-
-The backend has CORS enabled for all origins, so it doesn't matter whether
-the frontend is opened as a local file or served from a different port —
-both work against the same running backend.
+If the backend is not at `http://localhost:5000`, change `API_BASE` at the top of `script.js`.
 
 ## What it does
 
-- On load, fetches the bundled sample dataset's schema from
-  `GET /api/datasets/sample/schema` and shows the columns in the sidebar.
-- "Upload CSV" posts to `POST /api/upload`; the returned `dataset_id` is
-  used for all subsequent questions in that session.
-- Each chat message posts `{dataset_id, question}` to `POST /api/ask` and
-  renders the answer, any generated chart inline, and an **Analysis** trace:
-  every tool the agent ran, in order, with a check or cross, a one-line
-  result, the arguments (filters shown as `region == West`), and a `parallel`
-  tag for steps that ran concurrently.
-- A status dot in the sidebar shows whether the backend is reachable.
+- **Ask questions.** Answers appear as clean text (lists, tables and bold are rendered). Charts appear inline.
+  Which tools the agent used is deliberately not shown.
+- **Upload CSV.** If a file with the same name was analysed before but the contents differ, a dialog asks
+  whether it is the *same dataset* (keeps remembered facts) or a *different dataset* (starts fresh).
+- **Save changes to dataset.** When the agent cleaned the data (fill missing values, drop duplicates, and so on),
+  a button appears under that answer. Without pressing it, the edit applies to that question only.
+- **Memory.** Facts the agent remembers are listed in the sidebar; hover one and press x to forget it.
+  The section only appears once something is remembered.
+- The last dataset is reopened on refresh while the backend still has it; otherwise the bundled sample loads.
 
-## Notes
+## Files
 
-- This is intentionally a static, dependency-free frontend — easy to read
-  and explain end-to-end for an interview.
-- If `/api/ask` returns an error (e.g. missing `GROQ_API_KEY` on the
-  backend), it's shown directly in the chat thread rather than failing
-  silently.
+- `index.html`: structure
+- `style.css`: theme (white, black, purple); colours are variables at the top
+- `script.js`: behaviour
+
+To remove the example questions on the empty screen, delete the `<div class="examples">` block in `index.html`.

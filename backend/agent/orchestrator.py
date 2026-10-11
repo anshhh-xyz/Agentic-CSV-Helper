@@ -103,6 +103,7 @@ def _trace_entry(round_no: int, o: Outcome) -> dict:
         "arguments": o.arguments, "ok": o.ok,
         "error": o.result.get("error") if not o.ok else None,
         "summary": _summarize(o.result), "duration_ms": o.duration_ms, "parallel": o.parallel,
+        "mutated": bool(tool.mutates) if tool else False,
     }
 
 
@@ -137,7 +138,12 @@ def run_agent(df: pd.DataFrame, user_question: str, dataset_id: str,
     format_retries = 0
 
     def result(answer: str, rounds: int) -> dict:
-        return {"answer": answer, "tool_trace": trace, "plot_files": plot_files, "rounds": rounds}
+        data_changed = any(t["ok"] and t["mutated"] for t in trace)
+        return {
+            "answer": answer, "tool_trace": trace, "plot_files": plot_files, "rounds": rounds,
+            "data_changed": data_changed,
+            "final_df": ctx.df if data_changed else None,
+        }
 
     for round_no in range(1, max_tool_rounds() + 1):
         try:
