@@ -15,8 +15,14 @@ CATEGORY = "memory"
 @tool(
     name="remember",
     description=(
-        "Save a fact for future questions on this dataset: a term's definition, "
-        "a correction, a standing preference, or a named filter. Not for one-off details."
+        "PERSISTENT MEMORY WRITE: You MUST call this tool whenever the "
+        "user explicitly asks to remember, save, or store a definition, "
+        "correction, standing preference, or named filter for future "
+        "questions. Saving requires executing this tool; saying 'I will "
+        "remember' is not sufficient. Use a short stable key, preserve "
+        "the user's intended meaning, and choose the appropriate kind. "
+        "Do not use for temporary facts or one-off analysis results."
+        
     ),
 
     category=CATEGORY,

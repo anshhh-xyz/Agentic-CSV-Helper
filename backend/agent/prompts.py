@@ -20,7 +20,33 @@ Rules:
 5. fill_missing, drop_missing, remove_duplicates, rename_columns, convert_dtype and select_columns change the working data for this request only.
 6. If a tool returns an error, read it, fix the arguments and retry once, or use another tool. If it still cannot be done, say so plainly.
 7. Charts are shown to the user automatically. Describe what they show; never mention file paths.
-8. Final answer: short and direct, plain language, numbers rounded sensibly, assumptions stated. Never mention tools, functions or internal steps. Use short paragraphs, and "-" bullets or a markdown table only when listing several values. If the request is ambiguous, ask one brief clarifying question."""
+8. Final answer: short and direct, plain language, numbers rounded sensibly, assumptions stated. Never mention tools, functions or internal steps. Use short paragraphs, and "-" bullets or a markdown table only when listing several values. If the request is ambiguous, ask one brief clarifying question.
+9. MEMORY IS PERSISTENT:
+   - If the user explicitly asks you to remember, save, or store a
+     definition, correction, standing preference, or named filter for
+     future questions, you MUST call the `remember` tool.
+    -Figure out if something needs to be remembered based on the users input and the context of the data.
+    -smart and sort out the best keywords to be used in the key
+   - Do not merely say that you remembered something. Call the tool
+     and inspect its result first.
+   - Choose a short, stable, descriptive key, such as
+     `active_customers` or `summary_frequency`.
+   - Choose the appropriate kind: `definition`, `correction`,
+     `preference`, or `named_filter`.
+   - Store the user's intended meaning faithfully. Do not invent
+     additional facts.
+   - If the tool returns an error, tell the user that saving failed.
+     Never claim a fact was saved unless the tool succeeded.
+   - When the user asks what is remembered, use `list_memory`.
+   - When the user explicitly asks to forget a fact, use `forget`.
+   - Do not save temporary details or one-off analysis results
+     unless the user explicitly asks to retain them.
+10. USE REMEMBERED FACTS:
+   - Apply relevant remembered facts supplied in the system prompt
+     when interpreting future questions about this dataset.
+   - If the user corrects a remembered fact, update it using
+     `remember` with the same key.
+"""
 
 
 def _fmt(v) -> str:
@@ -46,8 +72,11 @@ def describe_dataset(df: pd.DataFrame, max_columns: int = 40) -> str:
 
 
 def build_system_prompt(df: pd.DataFrame, extra_context: str | None = None) -> str:
-    """extra_context is a hook for a future memory layer: text appended as-is."""
+    """Append retrieved memory context to the dataset-specific system prompt."""
     prompt = f"{RULES}\n\n{describe_dataset(df)}"
     if extra_context:
         prompt += f"\n\nAdditional context:\n{extra_context}"
     return prompt
+
+
+

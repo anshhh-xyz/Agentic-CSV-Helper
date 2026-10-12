@@ -11,7 +11,7 @@ MEMORY_DB_PATH = os.path.join(BASE_DIR, "data", "memory.db")
 
 
 def groq_model() -> str:
-    return os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
+    return os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
 
 
 def max_tool_rounds() -> int:
