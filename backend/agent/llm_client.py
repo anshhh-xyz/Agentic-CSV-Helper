@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import os
-
+import time 
 import groq
 from groq import Groq
 
@@ -49,6 +49,20 @@ def _is_tool_use_failed(exc: Exception) -> bool:
             return True
     return "tool_use_failed" in str(exc)
 
+def _usage_summary(response) -> dict:
+    usage = getattr(response, "usage", None)
+    if usage is None:
+        return {}
+    details = getattr(usage, "prompt_tokens_details", None)
+    fields = {
+        "prompt_tokens": getattr(usage, "prompt_tokens", None),
+        "cached_tokens": getattr(details, "cached_tokens", None) if details else None,
+        "completion_tokens": getattr(usage, "completion_tokens", None),
+        "queue_s": getattr(usage, "queue_time", None),
+        "groq_total_s": getattr(usage, "total_time", None),
+    }
+    return {k: v for k, v in fields.items() if v is not None}
+
 
 def chat_completion(client, messages: list, tools: list = None, model: str = None, tool_choice: str = "auto"):
     """One call to the LLM. tool_choice: "auto" (default) or "none" (force a text answer)."""
@@ -57,7 +71,14 @@ def chat_completion(client, messages: list, tools: list = None, model: str = Non
         kwargs["tools"] = tools
         kwargs["tool_choice"] = tool_choice
     try:
-        return client.chat.completions.create(**kwargs)
+        started = time.perf_counter()
+        response = client.chat.completions.create(**kwargs)
+        wall = time.perf_counter() - started
+        info = _usage_summary(response)
+        other = max(0.0, wall - info["groq_total_s"]) if "groq_total_s" in info else None
+        logger.info("LLM call: wall=%.2fs%s %s", wall,
+                    f" other={other:.2f}s" if other is not None else "", info)
+        return response
     except groq.BadRequestError as e:
         if _is_tool_use_failed(e):
             raise ToolCallFormatError("The model produced a malformed tool call.") from e

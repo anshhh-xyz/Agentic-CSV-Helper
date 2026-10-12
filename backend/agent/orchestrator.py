@@ -21,7 +21,7 @@ run_agent() returns
 """
 
 from __future__ import annotations
-
+import time
 import json
 import logging
 import uuid
@@ -137,7 +137,11 @@ def run_agent(df: pd.DataFrame, user_question: str, dataset_id: str,
     calls_made = 0
     format_retries = 0
 
+    started = time.perf_counter()
+
     def result(answer: str, rounds: int) -> dict:
+        logger.info("question done: total=%.2fs llm_rounds=%d tool_calls=%d tool_time=%dms",
+                    time.perf_counter() - started, rounds, len(trace), sum(t["duration_ms"] for t in trace))
         data_changed = any(t["ok"] and t["mutated"] for t in trace)
         return {
             "answer": answer, "tool_trace": trace, "plot_files": plot_files, "rounds": rounds,

@@ -10,9 +10,11 @@ Then open frontend/index.html in a browser -- it's already configured to
 call this API at http://localhost:5000.
 """
 
+import os
 from dotenv import load_dotenv
 
-load_dotenv()
+env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+load_dotenv(dotenv_path=env_path)
 
 from api.app import create_app  # noqa: E402  (must load .env first)
 
