@@ -50,3 +50,6 @@ backend/data/*.db-journal
 .idea/
 .DS_Store
 Thumbs.db
+
+#datasets
+.csv
